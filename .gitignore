@@ -23,3 +23,6 @@ Skincarebrands.xlsx
 # Dataset kept private - not published
 *.xlsx
 *.csv
+
+# Public demo sample for the hosted dashboard
+!demo_sample.xlsx

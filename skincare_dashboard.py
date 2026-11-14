@@ -43,12 +43,19 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Load data ─────────────────────────────────────────────────────────────────
+import os
+
+FULL_DATA   = "Skincare_Products_Complete.xlsx"   # private, not on GitHub
+DEMO_DATA   = "demo_sample.xlsx"                  # small public sample
+DEMO_MODE   = not os.path.exists(FULL_DATA)
+
 @st.cache_data
 def load_data():
+    source = DEMO_DATA if DEMO_MODE else FULL_DATA
     try:
-        df = pd.read_excel("Skincare_Products_Complete.xlsx", sheet_name="All Products")
+        df = pd.read_excel(source, sheet_name="All Products")
     except FileNotFoundError:
-        st.error("❌ Could not find 'Skincare_Products_Complete.xlsx'. Make sure it is in the same folder as this script.")
+        st.error(f"❌ Could not find '{source}'. Make sure it is in the same folder as this script.")
         st.stop()
 
     # Clean price — extract numeric value, treat SEK as ~EUR/10 approximation
@@ -386,6 +393,10 @@ if no_alcohol:
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("🧴 Skincare Product Intelligence Dashboard")
+if DEMO_MODE:
+    st.info("**Demo version:** this public app runs on a sample of the dataset. "
+            "The full analysis covers 482 products from 210 brands; see the findings in the "
+            "[GitHub repository](https://github.com/Aparna2423/skincare-market-analysis).")
 st.caption(f"Analysing **{len(fdf):,}** products across **{fdf['Brand'].nunique()}** brands | "
            f"from a total dataset of **{len(df):,}** products")
 
@@ -851,17 +862,18 @@ with tab5:
 
     st.dataframe(display_df, hide_index=True, width='stretch', height=520)
 
-    # Download button
-    csv = fdf.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="⬇️  Download filtered data as CSV",
-        data=csv,
-        file_name='skincare_filtered.csv',
-        mime='text/csv'
-    )
+    # Download button (only when running locally on the full data)
+    if not DEMO_MODE:
+        csv = fdf.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="⬇️  Download filtered data as CSV",
+            data=csv,
+            file_name='skincare_filtered.csv',
+            mime='text/csv'
+        )
 
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.caption("Built with Streamlit · Skincare Product Intelligence Project · "
-           "Dataset: 482 products, 210 brands")
+           + ("Demo sample of the dataset" if DEMO_MODE else "Dataset: 482 products, 210 brands"))
