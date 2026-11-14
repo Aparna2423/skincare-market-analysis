@@ -50,8 +50,8 @@ DEMO_DATA   = "demo_sample.xlsx"                  # small public sample
 DEMO_MODE   = not os.path.exists(FULL_DATA)
 
 @st.cache_data
-def load_data():
-    source = DEMO_DATA if DEMO_MODE else FULL_DATA
+def load_data(source, file_mtime):
+    # file_mtime is part of the cache key, so the cache refreshes whenever the data file changes
     try:
         df = pd.read_excel(source, sheet_name="All Products")
     except FileNotFoundError:
@@ -217,7 +217,8 @@ _CATEGORY_CONFIG = {
     'Other':       {'profile_heading': 'Profile', 'concern_label': 'Concern',       'concern_groups': CONCERN_GROUPS,      'type_label': 'Type',      'type_groups': SKIN_TYPE_GROUPS},
 }
 
-df = load_data()
+_source = DEMO_DATA if DEMO_MODE else FULL_DATA
+df = load_data(_source, os.path.getmtime(_source) if os.path.exists(_source) else 0)
 
 # ── Helpers: expand comma-separated fields ────────────────────────────────────
 def unique_vals(col):
