@@ -38,9 +38,9 @@ A ranking of the 20 cheapest sunscreens by price per ml, a practical shortlist f
 
 ## Interactive dashboard
 
-`skincare_dashboard.py` is a Streamlit app for exploring the dataset yourself:
+`skincare_dashboard.py` is a Streamlit app for exploring the dataset yourself. The public version runs on a **200-product sample** (`demo_sample.xlsx`, covering all 15 most-listed brands and every segment). The full dataset is only used locally:
 
-- **Filters:** product type, segment, skin concern and type, brand country, price range, ingredient search, fragrance-free and alcohol-free toggles
+- **Filters:** searchable brand and key-ingredient dropdowns, product type, segment, skin concern and type, brand country, price range, fragrance-free and alcohol-free toggles
 - **Compare:** segment mix, top product types, skin concern × segment heatmap, brands by country
 - **Price analysis:** price distribution, median price by type, price vs rating, best value per ml
 - **Ratings:** average by segment, top-rated products (min. 5,000 reviews), most-reviewed brands

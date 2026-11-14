@@ -241,10 +241,16 @@ st.sidebar.markdown("---")
 
 # ── Static: always-visible filters ───────────────────────────────────────────
 st.sidebar.markdown('<div class="sidebar-section">Brand & Ingredients</div>', unsafe_allow_html=True)
-brand_search = st.sidebar.text_input("Brand search", placeholder="e.g. CeraVe")
+brand_options = sorted(df['Brand'].dropna().unique().tolist(), key=str.lower)
+sel_brands   = st.sidebar.multiselect("Brand", brand_options,
+                                      placeholder="Type or pick, e.g. CeraVe")
 countries    = ['All'] + sorted(df['Country of Brand'].dropna().unique().tolist())
 sel_country  = st.sidebar.selectbox("Country of brand", countries)
-ingr_search  = st.sidebar.text_input("Key ingredient contains", placeholder="e.g. Niacinamide")
+# Most common ingredients first, so the dropdown starts with the useful ones
+ingr_options = (df['Key Ingredients'].dropna().str.split(',').explode().str.strip()
+                .loc[lambda x: x != ''].value_counts().index.tolist())
+sel_ingrs    = st.sidebar.multiselect("Key ingredients (must contain all)", ingr_options,
+                                      placeholder="Type or pick, e.g. Niacinamide")
 ff_only      = st.sidebar.checkbox("Fragrance-free claims only")
 no_alcohol   = st.sidebar.checkbox("No alcohol denat")
 
@@ -377,13 +383,13 @@ if sel_profile_type:
 if sel_country != 'All':
     fdf = fdf[fdf['Country of Brand'] == sel_country]
 
-if brand_search:
-    fdf = fdf[fdf['Brand'].str.contains(brand_search, case=False, na=False)]
+if sel_brands:
+    fdf = fdf[fdf['Brand'].isin(sel_brands)]
 
-if ingr_search:
+for ingr in sel_ingrs:
     fdf = fdf[
-        fdf['Key Ingredients'].fillna('').str.contains(ingr_search, case=False) |
-        fdf['INCI (partial)'].fillna('').str.contains(ingr_search, case=False)
+        fdf['Key Ingredients'].fillna('').str.contains(ingr, case=False, regex=False) |
+        fdf['INCI (partial)'].fillna('').str.contains(ingr, case=False, regex=False)
     ]
 
 if ff_only:
