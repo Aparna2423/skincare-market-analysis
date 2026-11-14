@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+# Environments & secrets
+.env
+.venv/
+venv/
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Not part of this project
+Jobspraget_automateskills.py
+LaunchChrome.bat
+# Early brand list, superseded by Skincare_Products_Complete.xlsx
+Skincarebrands.xlsx
+*.bak
+
+# Dataset kept private - not published
+*.xlsx
+*.csv
