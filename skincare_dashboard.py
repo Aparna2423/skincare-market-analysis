@@ -5,6 +5,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
+from dupe_finder import DupeFinder
+from assistant import ProductSearch, generate
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -423,9 +425,184 @@ k5.metric("Total reviews", f"{total_reviews:,}")
 st.markdown("---")
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊 Compare", "💰 Price Analysis", "⭐ Ratings", "🔬 Ingredients", "📋 Product Table"
+tab_ai, tab_dupe, tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "💬 Assistant", "💡 Dupe Finder", "📊 Compare", "💰 Price Analysis", "⭐ Ratings", "🔬 Ingredients", "📋 Product Table"
 ])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB A — SKINCARE ASSISTANT (RAG over the product table)
+# ══════════════════════════════════════════════════════════════════════════════
+@st.cache_resource
+def get_search(source, file_mtime, _df):
+    return ProductSearch(_df)
+
+def _groq_key():
+    try:
+        k = st.secrets.get("GROQ_API_KEY")          # Streamlit Cloud: App settings → Secrets
+    except Exception:
+        k = None
+    return k or os.getenv("GROQ_API_KEY")
+
+def _answer_table(res):
+    t = pd.DataFrame({
+        'Brand': res['Brand'], 'Product': res['Product Name'], 'Type': res['Product Type'],
+        'Price': res['Price_EUR'].apply(lambda p: f'€{p:.0f}' if pd.notna(p) else '—'),
+        'Size': res['Size'],
+        'Rating': res['Avg Rating'].apply(lambda r: f'{r:.1f} ★' if pd.notna(r) else '—'),
+        'Key ingredients': res['Key Ingredients'],
+    })
+    if 'Similarity' in res:
+        t.insert(0, 'Match', (res['Similarity'] * 100).round(0).astype(int).astype(str) + ' %')
+        t['You save'] = res['Saving %'].apply(lambda p: f'{p:.0f} % per ml' if pd.notna(p) else '—')
+    return t
+
+with tab_ai:
+    search = get_search(_source, os.path.getmtime(_source) if os.path.exists(_source) else 0, df)
+    groq_key = _groq_key()
+
+    st.markdown("### 💬 Skincare Assistant")
+    st.caption("Describe what you're looking for in plain English. The assistant finds matching products in the dataset "
+               "and an open-source language model writes the answer **using only those products** (retrieval-augmented generation).")
+    if groq_key:
+        st.caption("🟢 AI answers: Llama 3.1 (open-source) via Groq")
+    else:
+        st.caption("🟡 AI answers: local Ollama model if it's running on this computer, otherwise search results only")
+
+    if "chat" not in st.session_state:
+        st.session_state.chat = []
+
+    examples = ["Fragrance-free moisturiser for sensitive skin under €20",
+                "Cheaper alternative to SkinCeuticals C E Ferulic",
+                "Vegan serum with niacinamide for oily skin",
+                "Retinol serum under €30"]
+    clicked = None
+    ex_cols = st.columns(len(examples))
+    for col, ex in zip(ex_cols, examples):
+        if col.button(ex, key=f"ex_{ex}", width='stretch'):
+            clicked = ex
+
+    history = st.container()
+    typed = st.chat_input("e.g. hydrating eye cream for mature skin under €40")
+    question = typed or clicked
+
+    if question:
+        res, parsed, note = search.search(question, k=5)
+        with st.spinner("Finding products and writing an answer…"):
+            answer, backend = generate(question, res, note, groq_key=groq_key)
+        st.session_state.chat.append({"role": "user", "content": question})
+        st.session_state.chat.append({"role": "assistant", "content": answer, "backend": backend,
+                                      "note": note, "products": res})
+
+    with history:
+        if not st.session_state.chat:
+            st.info("Try one of the examples above, or type your own question below.")
+        for msg in st.session_state.chat:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+                if msg["role"] == "assistant":
+                    st.caption(f"Answer by: {msg['backend']} · {msg['note']}")
+                    if msg["products"] is not None and not msg["products"].empty:
+                        with st.expander("Products the answer is based on"):
+                            st.dataframe(_answer_table(msg["products"]), hide_index=True, width='stretch')
+        if st.session_state.chat and st.button("Clear chat", key="clear_chat"):
+            st.session_state.chat = []
+            st.rerun()
+
+    st.caption("ℹ️ Recommendations come from this dataset only and aren't medical advice. "
+               "For skin conditions, talk to a dermatologist.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 0 — DUPE FINDER
+# ══════════════════════════════════════════════════════════════════════════════
+@st.cache_resource
+def get_finder(source, file_mtime, _df):
+    # source + file_mtime form the cache key; _df is not hashed
+    return DupeFinder(_df)
+
+with tab_dupe:
+    finder = get_finder(_source, os.path.getmtime(_source) if os.path.exists(_source) else 0, df)
+    fd = finder.df
+
+    st.markdown("### 💡 Find a cheaper alternative")
+    st.caption("Pick a product and get the products with the most similar ingredient profile, "
+               "ranked by match score. Searches the whole dataset (sidebar filters don't apply here).")
+
+    pc1, pc2 = st.columns([1, 2])
+    with pc1:
+        type_opts = ["All"] + fd['Product Type'].value_counts().index.tolist()
+        pick_type = st.selectbox("Product type", type_opts, key="dupe_type")
+    pool = fd if pick_type == "All" else fd[fd['Product Type'] == pick_type]
+    pool = pool.sort_values(['Brand', 'Product Name'], key=lambda c: c.str.lower())
+    labels = {i: f"{r['Brand']} — {r['Product Name']}" for i, r in pool.iterrows()}
+    showcase = pool.index[pool['Product Name'].eq('C E Ferulic')]
+    default_i = list(labels).index(showcase[0]) if len(showcase) else 0
+    with pc2:
+        sel_i = st.selectbox("Product", list(labels), index=default_i,
+                             format_func=lambda i: labels[i], key="dupe_product")
+
+    oc1, oc2, oc3 = st.columns(3)
+    with oc1:
+        same_type = st.toggle("Same product type only", value=True, key="dupe_same")
+    with oc2:
+        cheaper_only = st.toggle("Cheaper alternatives only", value=True, key="dupe_cheaper")
+    with oc3:
+        top_n = st.slider("Number of results", 3, 10, 5, key="dupe_n")
+
+    t = fd.loc[sel_i]
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Price", f"€{t['Price_EUR']:.0f}" if pd.notna(t['Price_EUR']) else "—")
+    m2.metric("Size", str(t['Size']))
+    m3.metric("Price per ml", f"€{t['Price_per_ml']:.2f}" if pd.notna(t['Price_per_ml']) else "—")
+    m4.metric("Rating", f"{t['Avg Rating']:.1f} ★" if pd.notna(t['Avg Rating']) else "—")
+    st.markdown(f"**Key ingredients:** {t['Key Ingredients']}  ·  **Type:** {t['Product Type']}  ·  **Segment:** {t['Segment']}")
+
+    res = finder.find(sel_i, top_n=top_n, same_type=same_type, cheaper_only=cheaper_only)
+
+    if res.empty:
+        st.info("No similar products found with these settings. Try switching off "
+                "*Cheaper alternatives only* or *Same product type only*.")
+    else:
+        basis_col = 'Price_per_ml' if res['Compared on'].iloc[0] == 'price per ml' else 'Price_EUR'
+        basis_lbl = 'Price per ml (EUR)' if basis_col == 'Price_per_ml' else 'Price (EUR)'
+
+        chart_df = pd.concat([
+            pd.DataFrame({'Product': [f"{t['Brand']} — {t['Product Name']}"[:55]],
+                          'Value': [t[basis_col]], 'Kind': ['Selected']}),
+            pd.DataFrame({'Product': (res['Brand'] + ' — ' + res['Product Name']).str[:55],
+                          'Value': res[basis_col].values, 'Kind': ['Alternative'] * len(res)})
+        ])
+        figd = px.bar(chart_df, x='Value', y='Product', orientation='h', color='Kind',
+                      color_discrete_map={'Selected': '#cc0033', 'Alternative': '#2e86de'},
+                      labels={'Value': basis_lbl, 'Product': ''})
+        figd.update_layout(height=120 + 45 * len(chart_df), margin=dict(t=10, b=10, l=10, r=10),
+                           legend_title_text='', yaxis={'categoryorder': 'array',
+                           'categoryarray': chart_df['Product'].tolist()[::-1]})
+        st.plotly_chart(figd, width='stretch')
+
+        out = pd.DataFrame({
+            'Match': (res['Similarity'] * 100).round(0).astype(int).astype(str) + ' %',
+            'Brand': res['Brand'],
+            'Product': res['Product Name'],
+            'Type': res['Product Type'],
+            'Price': res['Price_EUR'].apply(lambda p: f'€{p:.0f}' if pd.notna(p) else '—'),
+            '€/ml': res['Price_per_ml'].apply(lambda p: f'€{p:.2f}' if pd.notna(p) else '—'),
+            'You save': res['Saving %'].apply(lambda p: f'{p:.0f} %' if pd.notna(p) else '—'),
+            'Rating': res['Avg Rating'].apply(lambda r: f'{r:.1f} ★' if pd.notna(r) else '—'),
+            'Shared ingredients': res['Shared ingredients'],
+        })
+        st.dataframe(out, hide_index=True, width='stretch')
+
+    with st.expander("How does the match score work?"):
+        st.markdown(
+            "Each product is turned into a weighted list of ingredients: **key ingredients count double**, "
+            "the partial INCI list counts once, and skin concerns count half (so products with the same purpose rank higher). "
+            "Synonyms are merged (e.g. *sodium hyaluronate* = *hyaluronic acid*, *tocopherol* = *vitamin E*).\n\n"
+            "**TF-IDF** weighting makes rare actives (retinol, niacinamide) count more than near-universal ones (water, glycerin), "
+            "and **cosine similarity** between these vectors gives the match score. Savings compare price per ml when both sizes are known.\n\n"
+            "⚠️ A similar ingredient list is not an identical formula: concentrations, textures and the full INCI can differ."
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════

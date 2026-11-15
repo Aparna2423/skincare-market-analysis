@@ -26,3 +26,8 @@ Skincarebrands.xlsx
 
 # Public demo sample for the hosted dashboard
 !demo_sample.xlsx
+*.bak*
+
+# API keys - never commit
+.streamlit/secrets.toml
+.env
